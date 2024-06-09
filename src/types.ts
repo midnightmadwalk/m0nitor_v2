@@ -4,5 +4,6 @@ export interface Erc20Token {
     decimals: number,
     name: string,
     symbol: string,
-    deployer: string
+    deployer: string,
+    response?: any
 }
