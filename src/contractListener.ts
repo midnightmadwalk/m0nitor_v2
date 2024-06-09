@@ -1,170 +1,144 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Base Block Listener</title>
-</head>
-<body>
-    <h1>Base Block Listener</h1>
-    <div id="block-container">
-        <p>Waiting for new blocks...</p>
-    </div>
-    <div id="transactions-container">
-        <h2>Transactions</h2>
-        <ul id="transactions-list"></ul>
-    </div>
-    <!-- Add the on/off slider -->
-    <div id="listener-control">
-        <label for="listener-toggle">Listener:</label>
-        <input type="checkbox" id="listener-toggle" checked>
-    </div>
+import { TransactionReceipt, ethers } from 'ethers';
+import { Erc20Token } from './types';
+import axios from 'axios';
 
-    <script>
-        const RPC_ENDPOINTS = [
-            'https://mainnet.base.org',
-            'https://base.blockpi.network/v1/rpc/public',
-            'https://public.stackup.sh/api/v1/node/base-mainnet',
-            'https://base-rpc.publicnode.com',
-            'https://base.drpc.org',
-            'https://1rpc.io/base',
-            'https://base.meowrpc.com',
-            'https://base.rpc.subquery.network/public',
-            'https://gateway.tenderly.co/public/base',
-            'https://base.gateway.tenderly.co',
-            'https://developer-access-mainnet.base.org',
-            'https://endpoints.omniatech.io/v1/base/mainnet/public'
-        ];
-        
-        let lastProcessedBlock = -1;
-        let currentRpcIndex = 0;
-        let pollingInterval;
-        let processingBlock = false;
+const erc20Abi = [
+    // Minimal ERC-20 ABI
+    "function totalSupply() view returns (uint256)",
+    "function balanceOf(address account) view returns (uint256)",
+    "function name() view returns (string)",
+    "function symbol() view returns (string)",
+    "function decimals() view returns (uint256)"
+];
 
-        function getNextRpcUrl() {
-            currentRpcIndex = (currentRpcIndex + 1) % RPC_ENDPOINTS.length;
-            return RPC_ENDPOINTS[currentRpcIndex];
-        }
+class ContractCreationListener {
+    private provider: ethers.Provider;
+    private running: boolean;
+    private blockHandler: (blockNumber: number) => Promise<void>;
+    private rpcEndpoints: string[];
+    private currentRpcIndex: number;
 
-        async function fetchLatestBlock() {
-            if (processingBlock) return; // Skip fetching if still processing
-            const NODE_URL = getNextRpcUrl();
+    constructor(providerUrl: string, rpcEndpoints: string[]) {
+        this.provider = new ethers.JsonRpcProvider(providerUrl);
+        this.running = false;
+        this.rpcEndpoints = rpcEndpoints;
+        this.currentRpcIndex = 0;
+
+        this.blockHandler = async (blockNumber: number) => {
+            console.log(`New block: ${blockNumber}`);
             try {
-                const response = await fetch(NODE_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        jsonrpc: "2.0",
-                        method: "eth_blockNumber",
-                        params: [],
-                        id: 1
-                    })
-                });
-
-                const data = await response.json();
-                const latestBlock = parseInt(data.result, 16);
-
-                if (latestBlock > lastProcessedBlock) {
-                    processingBlock = true;
-                    lastProcessedBlock = latestBlock;
-                    document.getElementById('block-container').innerText = `Latest Block: ${latestBlock}`;
-                    await fetchBlockDetails(`0x${latestBlock.toString(16)}`);
-                    processingBlock = false;
+                const block = await this.provider.getBlock(blockNumber);
+                if (block) {
+                    const txs = await Promise.all(block.transactions.map(hash => this.provider.getTransaction(hash)));
+                    for (const tx of txs) {
+                        if (tx && !tx.to) {
+                            const receipt = await this.provider.getTransactionReceipt(tx.hash);
+                            if (receipt && receipt.contractAddress) {
+                                console.log(`New contract created at address: ${receipt.contractAddress}`);
+                                await this.processContract(receipt);
+                            }
+                        }
+                    }
                 }
             } catch (error) {
-                console.error('Error fetching latest block:', error);
-                processingBlock = false;
+                await this.switchRpcEndpoint();
             }
+        };
+    }
+
+    private async switchRpcEndpoint(): Promise<void> {
+        this.currentRpcIndex = (this.currentRpcIndex + 1) % this.rpcEndpoints.length;
+        const newRpcUrl = this.rpcEndpoints[this.currentRpcIndex];
+        console.log(`Switching RPC endpoint to: ${newRpcUrl}`);
+        this.provider = new ethers.JsonRpcProvider(newRpcUrl);
+    }
+
+    public start(): void {
+        if (!this.running) {
+            this.running = true;
+            this.provider.on('block', this.blockHandler);
+            console.log('Listener started.');
         }
+    }
 
-        async function fetchBlockDetails(blockNumber) {
-            const NODE_URL = getNextRpcUrl();
-            try {
-                const response = await fetch(NODE_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        jsonrpc: "2.0",
-                        method: "eth_getBlockByNumber",
-                        params: [blockNumber, true], // 'true' to get full transaction objects
-                        id: 1
-                    })
-                });
-
-                const data = await response.json();
-                const block = data.result;
-                const transactions = block.transactions;
-                await displayTransactions(transactions, block.number);
-            } catch (error) {
-                console.error('Error fetching block details:', error);
-            }
+    public stop(): void {
+        if (this.running) {
+            this.running = false;
+            this.provider.off('block', this.blockHandler);
+            console.log('Listener stopped.');
         }
+    }
 
-        async function fetchTransactionReceipts(transactionHashes) {
-            const NODE_URL = getNextRpcUrl();
-            try {
-                const requests = transactionHashes.map(txHash => ({
-                    jsonrpc: "2.0",
-                    method: "eth_getTransactionReceipt",
-                    params: [txHash],
-                    id: txHash
-                }));
+    public async checkBlock(blockNumber: number): Promise<void> {
+        await this.blockHandler(blockNumber);
+    }
 
-                const response = await fetch(NODE_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(requests)
-                });
+    private async processContract(receipt: TransactionReceipt): Promise<void> {
+        try {
+            // Check if the contract conforms to ERC-20, and if so, get relevant information
+            const contract = new ethers.Contract(receipt.contractAddress ?? "", erc20Abi, this.provider);
 
-                const data = await response.json();
-                return data.map(item => item.result);
-            } catch (error) {
-                console.error('Error fetching transaction receipts:', error);
-                return [];
-            }
+            const totalSupplyRaw = await contract.totalSupply();
+            const decimals = await contract.decimals();
+
+            // Convert to BigInt and adjust for decimals
+            const totalSupply = BigInt(totalSupplyRaw.toString());
+            const adjustedTotalSupply = (totalSupply / BigInt(10) ** BigInt(decimals)).toString();
+
+            const name = await contract.name();
+            const symbol = await contract.symbol();
+
+            // Make a GET request to the specified endpoint for each found contract
+            const responseData = await this.fetchContractData(receipt.contractAddress ?? "");
+            const foundContract: Erc20Token = {
+                address: receipt.contractAddress ?? "",
+                name: name,
+                symbol: symbol,
+                totalSupply: adjustedTotalSupply,
+                decimals: decimals,
+                deployer: receipt.from,
+                response: responseData // Store response in found contract
+            };
+            console.log(foundContract);
+
+            console.log("Safe Addresses:", foundContract.response.results.safe);
+            console.log("Suspicious Addresses:", foundContract.response.results.suspicious);
+            console.log("New Addresses:", foundContract.response.results.new);
+            console.log("Failed Addresses:", foundContract.response.results.failed);
+
+        } catch (error) {
+            // If any of the operations fail, it may not be a valid ERC-20 contract at the time of deployment
+            // Optionally log this error
+            // console.error(`Error checking ERC-20 contract at address ${receipt.contractAddress ?? ""}:`, error);
         }
+    }
 
-        async function displayTransactions(transactions, blockNumber) {
-            const transactionsList = document.getElementById('transactions-list');
-            const transactionHashes = transactions.map(tx => tx.hash);
-
-            const receipts = await fetchTransactionReceipts(transactionHashes);
-
-            for (let i = 0; i < transactions.length; i++) {
-                const tx = transactions[i];
-                const receipt = receipts[i];
-                const listItem = document.createElement('li');
-                listItem.textContent = `Block: ${parseInt(blockNumber, 16)}, Tx Hash: ${tx.hash}`;
-                transactionsList.appendChild(listItem);
-
-                if (receipt && receipt.contractAddress !== null) {
-                    const receiptItem = document.createElement('pre'); // Use <pre> for displaying raw JSON
-                    receiptItem.textContent = JSON.stringify(receipt, null, 2); // Stringify the receipt with formatting
-                    listItem.appendChild(receiptItem);
-                }
-            }
+    private async fetchContractData(contractAddress: string): Promise<any> {
+        try {
+            const url = `https://pulseapi.solodragonsden.cloud/basechain/selector/${contractAddress}`
+            console.log(url)
+            const response = await axios.get(url);
+            return response.data;
+        } catch (error) {
+            console.error("Error fetching contract data:", error);
+            return null;
         }
+    }
+}
 
-        function toggleListener() {
-            const listenerToggle = document.getElementById('listener-toggle');
-            if (listenerToggle.checked) {
-                pollingInterval = setInterval(fetchLatestBlock, 1000);
-            } else {
-                clearInterval(pollingInterval);
-            }
-        }
+const RPC_ENDPOINTS = [
+    'https://base.blockpi.network/v1/rpc/public',
+    'https://public.stackup.sh/api/v1/node/base-mainnet',
+    'https://base-rpc.publicnode.com',
+    'https://base.drpc.org',
+    'https://1rpc.io/base',
+    'https://base.meowrpc.com',
+    'https://base.rpc.subquery.network/public',
+    'https://base.gateway.tenderly.co',
+    'https://developer-access-mainnet.base.org',
+    'https://endpoints.omniatech.io/v1/base/mainnet/public'
+];
 
-        // Start polling initially
-        toggleListener();
-
-        // Attach event listener to toggle button
-        document.getElementById('listener-toggle').addEventListener('change', toggleListener);
-    </script>
-</body>
-</html>
+const listener = new ContractCreationListener('https://mainnet.base.org', RPC_ENDPOINTS);
+// Start listening to new blocks
+listener.start();
