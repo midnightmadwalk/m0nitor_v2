@@ -35,7 +35,7 @@ class ContractCreationListener {
                         if (tx && !tx.to) {
                             const receipt = await this.provider.getTransactionReceipt(tx.hash);
                             if (receipt && receipt.contractAddress) {
-                                console.log(chalk.magentaBright(`New contract created at address: ${receipt.contractAddress}`));
+                                console.log(chalk.magentaBright(`New contract detected: ${receipt.contractAddress} at block ${blockNumber}`));
                                 await this.processContract(receipt);
                             }
                         }
@@ -54,11 +54,12 @@ class ContractCreationListener {
         this.provider = new ethers.JsonRpcProvider(newRpcUrl);
     }
 
-    public start(): void {
+    public async start(): Promise<void> {
         if (!this.running) {
             this.running = true;
             this.provider.on('block', this.blockHandler);
-            console.log(chalk.green('Listener started.'));
+            const latestBlockNumber = await this.provider.getBlockNumber();
+            console.log(chalk.green('Listener started.', latestBlockNumber));
         }
     }
 
@@ -103,10 +104,10 @@ class ContractCreationListener {
                 decimals: decimals,
                 deployer: `${open_exp}${receipt.from}`,
                 response: responseData, // Store response in found contract
-                balance: `${responseData_1} ETH`
+
             }
+            console.log("DEPLOYER BALANCE:", chalk.red(responseData_1));
             console.log(foundContract);
-            console.log(chalk.red(foundContract.balance));
             console.log("Safe Addresses:", foundContract.response.results.safe);
             console.log("Suspicious Addresses:", foundContract.response.results.suspicious);
             console.log("New Addresses:", foundContract.response.results.new);
