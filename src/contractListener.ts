@@ -1,6 +1,7 @@
 import { TransactionReceipt, ethers } from 'ethers';
 import { Erc20Token } from './types';
 import axios from 'axios';
+import chalk from 'chalk';
 
 const erc20Abi = [
     // Minimal ERC-20 ABI
@@ -25,7 +26,7 @@ class ContractCreationListener {
         this.currentRpcIndex = 0;
 
         this.blockHandler = async (blockNumber: number) => {
-            console.log(`New block: ${blockNumber}`);
+            process.stdout.write(chalk.blueBright(`RPC: ${this.rpcEndpoints[this.currentRpcIndex]}, New block: ${blockNumber}\r`));
             try {
                 const block = await this.provider.getBlock(blockNumber);
                 if (block) {
@@ -34,7 +35,7 @@ class ContractCreationListener {
                         if (tx && !tx.to) {
                             const receipt = await this.provider.getTransactionReceipt(tx.hash);
                             if (receipt && receipt.contractAddress) {
-                                console.log(`New contract created at address: ${receipt.contractAddress}`);
+                                console.log(chalk.magentaBright(`New contract created at address: ${receipt.contractAddress}`));
                                 await this.processContract(receipt);
                             }
                         }
@@ -49,7 +50,7 @@ class ContractCreationListener {
     private async switchRpcEndpoint(): Promise<void> {
         this.currentRpcIndex = (this.currentRpcIndex + 1) % this.rpcEndpoints.length;
         const newRpcUrl = this.rpcEndpoints[this.currentRpcIndex];
-        console.log(`Switching RPC endpoint to: ${newRpcUrl}`);
+        console.log(chalk.yellow(`Switching RPC endpoint to: ${newRpcUrl}`));
         this.provider = new ethers.JsonRpcProvider(newRpcUrl);
     }
 
@@ -57,7 +58,7 @@ class ContractCreationListener {
         if (!this.running) {
             this.running = true;
             this.provider.on('block', this.blockHandler);
-            console.log('Listener started.');
+            console.log(chalk.green('Listener started.'));
         }
     }
 
@@ -65,7 +66,7 @@ class ContractCreationListener {
         if (this.running) {
             this.running = false;
             this.provider.off('block', this.blockHandler);
-            console.log('Listener stopped.');
+            console.log(chalk.green('Listener stopped.'));
         }
     }
 
@@ -102,10 +103,10 @@ class ContractCreationListener {
                 decimals: decimals,
                 deployer: `${open_exp}${receipt.from}`,
                 response: responseData, // Store response in found contract
-                response_1: `${responseData_1} ETH`
+                balance: `${responseData_1} ETH`
             }
             console.log(foundContract);
-
+            console.log(chalk.red(foundContract.balance));
             console.log("Safe Addresses:", foundContract.response.results.safe);
             console.log("Suspicious Addresses:", foundContract.response.results.suspicious);
             console.log("New Addresses:", foundContract.response.results.new);
@@ -152,7 +153,7 @@ class ContractCreationListener {
     private async fetchContractData(contractAddress: string): Promise<any> {
         try {
             const url = `https://pulseapi.solodragonsden.cloud/eth/selector/${contractAddress}`
-            console.log(url)
+            // console.log(url)
             const response = await axios.get(url);
             return response.data;
         } catch (error) {
@@ -176,7 +177,6 @@ const RPC_ENDPOINTS = [
     'https://public.stackup.sh/api/v1/node/ethereum-mainnet',
     "https://eth-pokt.nodies.app",
     "https://rpc.mevblocker.io",
-    "https://rpc.mevblocker.io/"
 ];
 
 
