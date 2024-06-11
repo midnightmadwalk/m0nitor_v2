@@ -5,5 +5,6 @@ export interface Erc20Token {
     name: string,
     symbol: string,
     deployer: string,
-    response?: any
+    response?: any,
+    response_1?: any
 }
