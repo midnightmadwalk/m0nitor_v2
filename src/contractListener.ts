@@ -90,15 +90,20 @@ class ContractCreationListener {
 
             // Make a GET request to the specified endpoint for each found contract
             const responseData = await this.fetchContractData(receipt.contractAddress ?? "");
+            const responseData_1 = await this.fetchAdditionalData(receipt.from)
+            const open_exp = 'https://etherscan.com/address/';
+
+
             const foundContract: Erc20Token = {
-                address: receipt.contractAddress ?? "",
+                address: `${open_exp}${receipt.contractAddress}`,
                 name: name,
                 symbol: symbol,
                 totalSupply: adjustedTotalSupply,
                 decimals: decimals,
-                deployer: receipt.from,
-                response: responseData // Store response in found contract
-            };
+                deployer: `${open_exp}${receipt.from}`,
+                response: responseData, // Store response in found contract
+                response_1: `${responseData_1} ETH`
+            }
             console.log(foundContract);
 
             console.log("Safe Addresses:", foundContract.response.results.safe);
@@ -113,9 +118,40 @@ class ContractCreationListener {
         }
     }
 
+    private async fetchAdditionalData(address: string): Promise<any> {
+        try {
+            const url = 'https://eth.llamarpc.com';
+            const headers = { 'Content-Type': 'application/json' };
+            const payload = {
+                jsonrpc: '2.0',
+                method: 'eth_getBalance',
+                params: [address, "latest"],
+                id: '1'
+            };
+
+            const response = await axios.post(url, payload, { headers });
+            if (response.data && response.data.result) {
+                const balanceInWeiHex = response.data.result;
+                const balanceInWei = parseInt(balanceInWeiHex, 16);
+                const weiToEth = 1e18;
+                const balanceInEth = balanceInWei / weiToEth;
+                return balanceInEth.toString();
+
+            } else {
+                throw new Error('Invalid response from RPC');
+            }
+
+        } catch (error) {
+            console.error('Error fetching additional data:', error);
+            throw error;
+
+        }
+
+    }
+
     private async fetchContractData(contractAddress: string): Promise<any> {
         try {
-            const url = `https://pulseapi.solodragonsden.cloud/basechain/selector/${contractAddress}`
+            const url = `https://pulseapi.solodragonsden.cloud/eth/selector/${contractAddress}`
             console.log(url)
             const response = await axios.get(url);
             return response.data;
@@ -126,19 +162,25 @@ class ContractCreationListener {
     }
 }
 
+
 const RPC_ENDPOINTS = [
-    'https://base.blockpi.network/v1/rpc/public',
-    'https://public.stackup.sh/api/v1/node/base-mainnet',
-    'https://base-rpc.publicnode.com',
-    'https://base.drpc.org',
-    'https://1rpc.io/base',
-    'https://base.meowrpc.com',
-    'https://base.rpc.subquery.network/public',
-    'https://base.gateway.tenderly.co',
-    'https://developer-access-mainnet.base.org',
-    'https://endpoints.omniatech.io/v1/base/mainnet/public'
+    'https://1rpc.io/eth',
+    'https://rpc.payload.de/',
+    'https://rpc.flashbots.net/',
+    'https://rpc.ankr.com/eth',
+    'https://eth-mainnet.public.blastapi.io',
+    'https://api.securerpc.com/v1',
+    'https://ethereum.publicnode.com',
+    'https://eth.merkle.io',
+    'https://eth.drpc.org',
+    'https://public.stackup.sh/api/v1/node/ethereum-mainnet',
+    "https://eth-pokt.nodies.app",
+    "https://rpc.mevblocker.io",
+    "https://rpc.mevblocker.io/"
 ];
 
-const listener = new ContractCreationListener('https://mainnet.base.org', RPC_ENDPOINTS);
+
+
+const listener = new ContractCreationListener('https://eth.llamarpc.com', RPC_ENDPOINTS);
 // Start listening to new blocks
 listener.start();
